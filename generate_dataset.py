@@ -52,8 +52,9 @@ class BackgroundGenerator:
         return bg
     
     def generate_texture(self) -> np.ndarray:
-        """Generate texture backgrounds (noise patterns, grid patterns)."""
-        texture_type = random.choice(['noise', 'grid', 'gaussian_noise'])
+        """Generate texture backgrounds (noise patterns, grid patterns, dirty textures)."""
+        texture_type = random.choice(['noise', 'grid', 'gaussian_noise', 'heavy_noise', 
+                                     'speckle', 'dirty', 'scratched', 'stained'])
         
         if texture_type == 'noise':
             # Uniform noise
@@ -63,6 +64,61 @@ class BackgroundGenerator:
             # Gaussian noise
             bg = np.random.normal(240, 10, (self.height, self.width, 3)).astype(np.uint8)
             bg = np.clip(bg, 200, 255)
+        
+        elif texture_type == 'heavy_noise':
+            # Heavy noise with darker variations
+            base = np.random.randint(180, 255, (self.height, self.width, 3), dtype=np.uint8)
+            noise = np.random.randint(-30, 30, (self.height, self.width, 3), dtype=np.int16)
+            bg = np.clip(base.astype(np.int16) + noise, 150, 255).astype(np.uint8)
+        
+        elif texture_type == 'speckle':
+            # Speckle noise pattern
+            bg = np.ones((self.height, self.width, 3), dtype=np.uint8) * random.randint(230, 255)
+            num_specks = random.randint(500, 2000)
+            for _ in range(num_specks):
+                x = random.randint(0, self.width - 1)
+                y = random.randint(0, self.height - 1)
+                intensity = random.randint(150, 240)
+                size = random.randint(1, 3)
+                cv2.circle(bg, (x, y), size, (intensity, intensity, intensity), -1)
+        
+        elif texture_type == 'dirty':
+            # Dirty/aged paper effect
+            bg = np.random.randint(200, 255, (self.height, self.width, 3), dtype=np.uint8)
+            # Add darker patches
+            num_patches = random.randint(10, 30)
+            for _ in range(num_patches):
+                x = random.randint(0, self.width - 1)
+                y = random.randint(0, self.height - 1)
+                w_patch = random.randint(50, 200)
+                h_patch = random.randint(50, 200)
+                intensity = random.randint(180, 230)
+                cv2.ellipse(bg, (x, y), (w_patch, h_patch), 0, 0, 360,
+                           (intensity, intensity, intensity), -1)
+        
+        elif texture_type == 'scratched':
+            # Scratched surface
+            bg = np.ones((self.height, self.width, 3), dtype=np.uint8) * random.randint(220, 255)
+            num_scratches = random.randint(20, 50)
+            for _ in range(num_scratches):
+                x1 = random.randint(0, self.width)
+                y1 = random.randint(0, self.height)
+                x2 = random.randint(0, self.width)
+                y2 = random.randint(0, self.height)
+                intensity = random.randint(190, 230)
+                thickness = random.randint(1, 3)
+                cv2.line(bg, (x1, y1), (x2, y2), (intensity, intensity, intensity), thickness)
+        
+        elif texture_type == 'stained':
+            # Stained background
+            bg = np.random.randint(210, 255, (self.height, self.width, 3), dtype=np.uint8)
+            num_stains = random.randint(5, 15)
+            for _ in range(num_stains):
+                x = random.randint(0, self.width - 1)
+                y = random.randint(0, self.height - 1)
+                radius = random.randint(30, 150)
+                intensity = random.randint(170, 220)
+                cv2.circle(bg, (x, y), radius, (intensity, intensity, intensity), -1)
         
         else:  # grid
             # Grid pattern
@@ -123,7 +179,6 @@ class SymbolProcessor:
             A.RandomRotate90(p=0.3),
             A.Blur(blur_limit=3, p=0.6),
             A.GaussNoise(p=0.5),
-            A.InvertImg(p=0.5),
             A.ColorJitter(
                 brightness=0.2, contrast=0.2,
                 saturation=0.2, hue=0.2, p=0.5
@@ -270,25 +325,46 @@ class SchematicComposer:
             # Random rotation (small angles for realism)
             angle = random.uniform(-15, 15)
             
-            # Random position
+            # Calculate rotated image dimensions for collision detection
             h, w = img.shape[:2]
+            if angle != 0:
+                rad = math.radians(abs(angle))
+                cos_a, sin_a = math.cos(rad), math.sin(rad)
+                # Dimensions needed to contain rotated image
+                rot_w = int(h * sin_a + w * cos_a)
+                rot_h = int(h * cos_a + w * sin_a)
+            else:
+                rot_w, rot_h = w, h
+            
+            # Random position using rotated dimensions
             attempts = 0
             while attempts < max_attempts:
-                x = random.randint(w//2 + 50, self.width - w//2 - 50)
-                y = random.randint(h//2 + 50, self.height - h//2 - 50)
+                x = random.randint(rot_w//2 + 50, self.width - rot_w//2 - 50)
+                y = random.randint(rot_h//2 + 50, self.height - rot_h//2 - 50)
                 
-                if not self.check_collision(x, y, img, placed_symbols):
+                # Create a temporary image with rotated dimensions for collision check
+                temp_img = np.zeros((rot_h, rot_w, 3), dtype=np.uint8)
+                if not self.check_collision(x, y, temp_img, placed_symbols):
                     break
                 attempts += 1
             
             if attempts >= max_attempts:
                 continue  # Skip this symbol if can't place
             
-            # Rotate image if needed
+            # Rotate image if needed (without clipping)
             if angle != 0:
-                center = (w//2, h//2)
+                # Create padded image with white background
+                padded_img = np.ones((rot_h, rot_w, 3), dtype=np.uint8) * 255
+                
+                # Calculate offset to center the original image in the padded image
+                offset_x = (rot_w - w) // 2
+                offset_y = (rot_h - h) // 2
+                padded_img[offset_y:offset_y + h, offset_x:offset_x + w] = img
+                
+                # Rotate around center of padded image
+                center = (rot_w // 2, rot_h // 2)
                 rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
-                img_rotated = cv2.warpAffine(img, rotation_matrix, (w, h), 
+                img_rotated = cv2.warpAffine(padded_img, rotation_matrix, (rot_w, rot_h),
                                             borderValue=(255, 255, 255))
             else:
                 img_rotated = img
@@ -470,7 +546,7 @@ def generate_dataset(output_dir: str = 'output', num_images: int = 100,
 if __name__ == '__main__':
     generate_dataset(
         output_dir='output',
-        num_images=100,
+        num_images=30,
         symbols_dir='Instruments',
         width=1920,
         height=1080
