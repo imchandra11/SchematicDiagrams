@@ -15,39 +15,113 @@ class BackgroundGenerator:
         self.height = height
     
     def generate_gradient(self) -> np.ndarray:
-        """Generate gradient backgrounds (linear, radial, diagonal)."""
-        bg_type = random.choice(['linear_h', 'linear_v', 'linear_d', 'radial'])
+        """Generate gradient backgrounds (linear, radial, diagonal, multi-directional)."""
+        bg_type = random.choice(['linear_h', 'linear_v', 'linear_d', 'radial', 
+                                'radial_multi', 'corner_radial', 'vertical_split', 'horizontal_split'])
         
         if bg_type == 'linear_h':
             # Horizontal gradient
-            bg = np.linspace(200, 255, self.width, dtype=np.uint8)
+            start = random.randint(180, 240)
+            end = random.randint(start, 255)
+            bg = np.linspace(start, end, self.width, dtype=np.uint8)
             bg = np.tile(bg, (self.height, 1))
             bg = cv2.merge([bg, bg, bg])
         
         elif bg_type == 'linear_v':
             # Vertical gradient
-            bg = np.linspace(200, 255, self.height, dtype=np.uint8)
+            start = random.randint(180, 240)
+            end = random.randint(start, 255)
+            bg = np.linspace(start, end, self.height, dtype=np.uint8)
             bg = np.tile(bg, (self.width, 1)).T
             bg = cv2.merge([bg, bg, bg])
         
         elif bg_type == 'linear_d':
             # Diagonal gradient
+            start = random.randint(180, 240)
+            end = random.randint(start, 255)
             bg = np.zeros((self.height, self.width, 3), dtype=np.uint8)
             for i in range(self.height):
                 for j in range(self.width):
-                    intensity = int(200 + 55 * (i + j) / (self.height + self.width))
+                    intensity = int(start + (end - start) * (i + j) / (self.height + self.width))
                     bg[i, j] = [intensity, intensity, intensity]
         
-        else:  # radial
-            # Radial gradient
+        elif bg_type == 'radial':
+            # Radial gradient from center
             center_x, center_y = self.width // 2, self.height // 2
             max_dist = math.sqrt(center_x**2 + center_y**2)
+            center_intensity = random.randint(180, 240)
+            edge_intensity = random.randint(center_intensity, 255)
             bg = np.zeros((self.height, self.width, 3), dtype=np.uint8)
             for i in range(self.height):
                 for j in range(self.width):
                     dist = math.sqrt((i - center_y)**2 + (j - center_x)**2)
-                    intensity = int(200 + 55 * (1 - dist / max_dist))
+                    intensity = int(center_intensity + (edge_intensity - center_intensity) * (1 - dist / max_dist))
                     bg[i, j] = [intensity, intensity, intensity]
+        
+        elif bg_type == 'radial_multi':
+            # Multiple radial gradients
+            bg = np.ones((self.height, self.width, 3), dtype=np.uint8) * random.randint(220, 255)
+            num_centers = random.randint(2, 4)
+            for _ in range(num_centers):
+                cx = random.randint(0, self.width)
+                cy = random.randint(0, self.height)
+                max_dist = random.randint(300, 600)
+                center_int = random.randint(190, 240)
+                edge_int = random.randint(center_int, 255)
+                for i in range(0, self.height, 2):
+                    for j in range(0, self.width, 2):
+                        dist = math.sqrt((i - cy)**2 + (j - cx)**2)
+                        if dist < max_dist:
+                            intensity = int(center_int + (edge_int - center_int) * (1 - dist / max_dist))
+                            intensity = max(0, min(255, intensity))
+                            bg[i, j] = [intensity, intensity, intensity]
+        
+        elif bg_type == 'corner_radial':
+            # Radial gradient from corner
+            corner = random.choice(['top_left', 'top_right', 'bottom_left', 'bottom_right'])
+            if corner == 'top_left':
+                cx, cy = 0, 0
+            elif corner == 'top_right':
+                cx, cy = self.width, 0
+            elif corner == 'bottom_left':
+                cx, cy = 0, self.height
+            else:  # bottom_right
+                cx, cy = self.width, self.height
+            max_dist = math.sqrt(self.width**2 + self.height**2)
+            center_intensity = random.randint(180, 240)
+            edge_intensity = random.randint(center_intensity, 255)
+            bg = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+            for i in range(self.height):
+                for j in range(self.width):
+                    dist = math.sqrt((i - cy)**2 + (j - cx)**2)
+                    intensity = int(center_intensity + (edge_intensity - center_intensity) * (dist / max_dist))
+                    bg[i, j] = [intensity, intensity, intensity]
+        
+        elif bg_type == 'vertical_split':
+            # Vertical split gradient
+            split_x = random.randint(self.width // 4, 3 * self.width // 4)
+            left_int = random.randint(180, 240)
+            right_int = random.randint(180, 240)
+            bg = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+            for j in range(self.width):
+                if j < split_x:
+                    intensity = int(left_int + (255 - left_int) * j / split_x)
+                else:
+                    intensity = int(right_int + (255 - right_int) * (j - split_x) / (self.width - split_x))
+                bg[:, j] = [intensity, intensity, intensity]
+        
+        else:  # horizontal_split
+            # Horizontal split gradient
+            split_y = random.randint(self.height // 4, 3 * self.height // 4)
+            top_int = random.randint(180, 240)
+            bottom_int = random.randint(180, 240)
+            bg = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+            for i in range(self.height):
+                if i < split_y:
+                    intensity = int(top_int + (255 - top_int) * i / split_y)
+                else:
+                    intensity = int(bottom_int + (255 - bottom_int) * (i - split_y) / (self.height - split_y))
+                bg[i, :] = [intensity, intensity, intensity]
         
         return bg
     
@@ -83,18 +157,25 @@ class BackgroundGenerator:
                 cv2.circle(bg, (x, y), size, (intensity, intensity, intensity), -1)
         
         elif texture_type == 'dirty':
-            # Dirty/aged paper effect
-            bg = np.random.randint(200, 255, (self.height, self.width, 3), dtype=np.uint8)
-            # Add darker patches
-            num_patches = random.randint(10, 30)
+            # Dirty/aged paper effect - more dirty
+            base_intensity = random.randint(180, 240)
+            bg = np.random.randint(base_intensity - 20, base_intensity + 20, (self.height, self.width, 3), dtype=np.uint8)
+            bg = np.clip(bg, 150, 255)
+            
+            # Add many darker patches (more dirt)
+            num_patches = random.randint(30, 60)
             for _ in range(num_patches):
                 x = random.randint(0, self.width - 1)
                 y = random.randint(0, self.height - 1)
-                w_patch = random.randint(50, 200)
-                h_patch = random.randint(50, 200)
-                intensity = random.randint(180, 230)
-                cv2.ellipse(bg, (x, y), (w_patch, h_patch), 0, 0, 360,
+                w_patch = random.randint(40, 250)
+                h_patch = random.randint(40, 250)
+                intensity = random.randint(150, base_intensity - 20)
+                cv2.ellipse(bg, (x, y), (w_patch, h_patch), random.randint(0, 360), 0, 360,
                            (intensity, intensity, intensity), -1)
+            
+            # Add noise overlay
+            noise = np.random.randint(-15, 15, (self.height, self.width, 3), dtype=np.int16)
+            bg = np.clip(bg.astype(np.int16) + noise, 140, 255).astype(np.uint8)
         
         elif texture_type == 'scratched':
             # Scratched surface
@@ -351,10 +432,21 @@ class SchematicComposer:
             if attempts >= max_attempts:
                 continue  # Skip this symbol if can't place
             
-            # Rotate image if needed (without clipping)
+            # Rotate image if needed (without clipping, using background color)
             if angle != 0:
-                # Create padded image with white background
-                padded_img = np.ones((rot_h, rot_w, 3), dtype=np.uint8) * 255
+                # Sample background color at placement location (use average of surrounding area)
+                sample_x1 = max(0, x - rot_w // 4)
+                sample_x2 = min(self.width, x + rot_w // 4)
+                sample_y1 = max(0, y - rot_h // 4)
+                sample_y2 = min(self.height, y + rot_h // 4)
+                bg_sample = background[sample_y1:sample_y2, sample_x1:sample_x2]
+                if bg_sample.size > 0:
+                    bg_color = np.mean(bg_sample.reshape(-1, 3), axis=0).astype(np.uint8)
+                else:
+                    bg_color = background[y, x].astype(np.uint8)
+                
+                # Create padded image with background color
+                padded_img = np.ones((rot_h, rot_w, 3), dtype=np.uint8) * bg_color
                 
                 # Calculate offset to center the original image in the padded image
                 offset_x = (rot_w - w) // 2
@@ -365,7 +457,7 @@ class SchematicComposer:
                 center = (rot_w // 2, rot_h // 2)
                 rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
                 img_rotated = cv2.warpAffine(padded_img, rotation_matrix, (rot_w, rot_h),
-                                            borderValue=(255, 255, 255))
+                                            borderValue=tuple(map(int, bg_color)))
             else:
                 img_rotated = img
                 angle = 0
