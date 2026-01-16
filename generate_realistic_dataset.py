@@ -37,38 +37,38 @@ class SpatialTransformProcessor:
                 shift_limit=0.1, scale_limit=0.2, rotate_limit=15,
                 border_mode=cv2.BORDER_CONSTANT, fill=(255, 255, 255), p=0.6
             ),
-            # Grid distortion
-            lambda: A.GridDistortion(
-                num_steps=5, distort_limit=0.3,
-                border_mode=cv2.BORDER_CONSTANT, fill=(255, 255, 255), p=0.4
-            ),
-            # Grid elastic deform (doesn't support fill, uses border_mode only)
-            lambda: A.GridElasticDeform(
-                num_grid_xy=(4, 4), magnitude=10,
-                p=0.3
-            ),
-            # Piecewise affine
-            lambda: A.PiecewiseAffine(
-                scale=(0.01, 0.05), nb_rows=4, nb_cols=4,
-                border_mode=cv2.BORDER_CONSTANT, fill=(255, 255, 255), p=0.3
-            ),
-            # Thin plate spline
-            lambda: A.ThinPlateSpline(
-                scale_range=(0.1, 0.3), num_control_points=4,
-                border_mode=cv2.BORDER_CONSTANT, fill=(255, 255, 255), p=0.3
-            ),
-            # Elastic transform
-            lambda: A.ElasticTransform(
-                alpha=50, sigma=5,
-                border_mode=cv2.BORDER_CONSTANT, fill=(255, 255, 255), p=0.4
-            ),
-            # Optical distortion
-            lambda: A.OpticalDistortion(
-                distort_limit=0.1,
-                border_mode=cv2.BORDER_CONSTANT, fill=(255, 255, 255), p=0.3
-            ),
-            # Square symmetry
-            lambda: A.SquareSymmetry(p=0.2),
+            # # Grid distortion
+            # lambda: A.GridDistortion(
+            #     num_steps=5, distort_limit=0.3,
+            #     border_mode=cv2.BORDER_CONSTANT, fill=(255, 255, 255), p=0.4
+            # ),
+            # # Grid elastic deform (doesn't support fill, uses border_mode only)
+            # lambda: A.GridElasticDeform(
+            #     num_grid_xy=(4, 4), magnitude=10,
+            #     p=0.3
+            # ),
+            # # Piecewise affine
+            # lambda: A.PiecewiseAffine(
+            #     scale=(0.01, 0.05), nb_rows=4, nb_cols=4,
+            #     border_mode=cv2.BORDER_CONSTANT, fill=(255, 255, 255), p=0.3
+            # ),
+            # # Thin plate spline
+            # lambda: A.ThinPlateSpline(
+            #     scale_range=(0.1, 0.3), num_control_points=4,
+            #     border_mode=cv2.BORDER_CONSTANT, fill=(255, 255, 255), p=0.3
+            # ),
+            # # Elastic transform
+            # lambda: A.ElasticTransform(
+            #     alpha=50, sigma=5,
+            #     border_mode=cv2.BORDER_CONSTANT, fill=(255, 255, 255), p=0.4
+            # ),
+            # # Optical distortion
+            # lambda: A.OpticalDistortion(
+            #     distort_limit=0.1,
+            #     border_mode=cv2.BORDER_CONSTANT, fill=(255, 255, 255), p=0.3
+            # ),
+            # # Square symmetry
+            # lambda: A.SquareSymmetry(p=0.2),
         ]
     
     def apply_spatial_transform(self, img: np.ndarray, bg_color: Tuple[int, int, int] = (255, 255, 255)) -> np.ndarray:
@@ -372,7 +372,7 @@ class SchematicComposer:
                      num_symbols: int = None, max_attempts: int = 100) -> Tuple[np.ndarray, List[Dict]]:
         """Place symbols on white background with spatial transforms."""
         if num_symbols is None:
-            num_symbols = random.randint(5, 20)
+            num_symbols = random.randint(15, 20)
         
         num_symbols = min(num_symbols, len(symbols))
         selected_symbols = random.sample(symbols, num_symbols)
@@ -478,18 +478,49 @@ class SchematicComposer:
         
         return canvas, placed_symbols
     
+    def draw_l_shaped_connection(self, img: np.ndarray, pt1: Tuple[int, int], pt2: Tuple[int, int],
+                                 line_color: Tuple[int, int, int], line_width: int) -> np.ndarray:
+        """Draw L-shaped connection (horizontal then vertical or vice versa)."""
+        x1, y1 = pt1
+        x2, y2 = pt2
+        
+        # Randomly choose horizontal-first or vertical-first
+        if random.random() < 0.5:
+            # Horizontal then vertical
+            mid_x = x2
+            mid_y = y1
+        else:
+            # Vertical then horizontal
+            mid_x = x1
+            mid_y = y2
+        
+        # Draw horizontal segment
+        cv2.line(img, (x1, y1), (mid_x, mid_y), line_color, line_width)
+        # Draw vertical segment
+        cv2.line(img, (mid_x, mid_y), (x2, y2), line_color, line_width)
+        
+        return img
+    
     def connect_symbols_edge_to_edge(self, canvas: np.ndarray, placed_symbols: List[Dict],
                                      connection_prob: float = 0.4, 
                                      distance_threshold: int = 500) -> np.ndarray:
-        """Connect symbols with wires/lines edge-to-edge with different widths."""
+        """Connect symbols with wires/lines edge-to-edge. Each symbol has 1-3 connections."""
         result = canvas.copy()
         
+        if len(placed_symbols) < 2:
+            return result
+        
+        # Track connections per symbol (by index)
+        connection_count = {i: 0 for i in range(len(placed_symbols))}
+        connections_made = []  # List of (i, j) pairs that are connected
+        
+        # Build list of potential connections with distances
+        potential_connections = []
         for i, sym1 in enumerate(placed_symbols):
-            for sym2 in placed_symbols[i+1:]:
+            for j, sym2 in enumerate(placed_symbols[i+1:], start=i+1):
                 dist = math.sqrt((sym1['x'] - sym2['x'])**2 + (sym1['y'] - sym2['y'])**2)
-                
-                if dist < distance_threshold and random.random() < connection_prob:
-                    # Get edge points for both symbols (using original image with angle)
+                if dist < distance_threshold:
+                    # Get edge points for both symbols
                     edges1 = self.get_edge_points(sym1['x'], sym1['y'], sym1['image'], sym1['angle'])
                     edges2 = self.get_edge_points(sym2['x'], sym2['y'], sym2['image'], sym2['angle'])
                     
@@ -507,16 +538,71 @@ class SchematicComposer:
                                 best_edge2 = e2
                     
                     if best_edge1 and best_edge2:
-                        # Random line width
-                        line_width = random.randint(2, 5)
-                        # Random line color (dark gray to black)
-                        line_color = (random.randint(0, 50), random.randint(0, 50), random.randint(0, 50))
-                        
-                        # Draw line edge-to-edge
-                        cv2.line(result, 
-                                (int(best_edge1[0]), int(best_edge1[1])),
-                                (int(best_edge2[0]), int(best_edge2[1])),
-                                line_color, line_width)
+                        potential_connections.append({
+                            'i': i,
+                            'j': j,
+                            'dist': dist,
+                            'edge1': best_edge1,
+                            'edge2': best_edge2
+                        })
+        
+        # Sort by distance (closer connections first)
+        potential_connections.sort(key=lambda x: x['dist'])
+        
+        # Phase 1: Ensure each symbol has at least 1 connection
+        for conn in potential_connections:
+            i, j = conn['i'], conn['j']
+            if connection_count[i] == 0 or connection_count[j] == 0:
+                # Make this connection
+                connections_made.append((i, j))
+                connection_count[i] += 1
+                connection_count[j] += 1
+        
+        # Phase 2: Add more connections up to max 3 per symbol
+        for conn in potential_connections:
+            i, j = conn['i'], conn['j']
+            # Skip if already connected
+            if (i, j) in connections_made:
+                continue
+            # Skip if either symbol already has 3 connections
+            if connection_count[i] >= 3 or connection_count[j] >= 3:
+                continue
+            # Random chance to add connection
+            if random.random() < connection_prob:
+                connections_made.append((i, j))
+                connection_count[i] += 1
+                connection_count[j] += 1
+        
+        # Draw all connections
+        for conn in potential_connections:
+            i, j = conn['i'], conn['j']
+            if (i, j) in connections_made:
+                edge1 = conn['edge1']
+                edge2 = conn['edge2']
+                
+                # Random line width
+                line_width = random.randint(1, 2)
+                # Random line color (dark gray to black)
+                line_color = (random.randint(0, 50), random.randint(0, 50), random.randint(0, 50))
+                
+                # Randomly choose between straight line and L-shaped connection
+                use_l_shape = random.random() < 0.5
+                
+                if use_l_shape:
+                    # Draw L-shaped connection
+                    result = self.draw_l_shaped_connection(
+                        result,
+                        (int(edge1[0]), int(edge1[1])),
+                        (int(edge2[0]), int(edge2[1])),
+                        line_color,
+                        line_width
+                    )
+                else:
+                    # Draw straight line
+                    cv2.line(result,
+                            (int(edge1[0]), int(edge1[1])),
+                            (int(edge2[0]), int(edge2[1])),
+                            line_color, line_width)
         
         return result
     
@@ -631,7 +717,7 @@ def generate_realistic_dataset(output_dir: str = 'output', num_images: int = 30,
 if __name__ == '__main__':
     generate_realistic_dataset(
         output_dir='output',
-        num_images=30,
+        num_images=100,
         symbols_dir='Instruments',
         width=1920,
         height=1080
