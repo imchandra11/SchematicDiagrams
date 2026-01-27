@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+DigitizePID_Dataset/
+output/
 # Environments
 .venv/
 venv/

@@ -702,7 +702,7 @@ def generate_realistic_dataset(output_dir: str = 'output', num_images: int = 30,
         cv2.imwrite(str(image_path), cv2.cvtColor(canvas, cv2.COLOR_RGB2BGR))
         
         # Save annotation
-        annotation_filename = f"schematic_{i+1:03d}.txt"
+        annotation_filename = f"gt_schematic_{i+1:03d}.txt"
         annotation_path = annotations_dir / annotation_filename
         annotation_writer.write_annotation(str(annotation_path), annotations)
         
@@ -717,7 +717,7 @@ def generate_realistic_dataset(output_dir: str = 'output', num_images: int = 30,
 if __name__ == '__main__':
     generate_realistic_dataset(
         output_dir='output',
-        num_images=100,
+        num_images=20,
         symbols_dir='Instruments',
         width=1920,
         height=1080

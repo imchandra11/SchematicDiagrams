@@ -889,7 +889,7 @@ def generate_enhanced_dataset(output_dir: str = 'output', num_images: int = 100,
         cv2.imwrite(str(image_path), cv2.cvtColor(canvas, cv2.COLOR_RGB2BGR))
         
         # Save annotation
-        annotation_filename = f"schematic_{i+1:03d}.txt"
+        annotation_filename = f"gt_schematic_{i+1:03d}.txt"
         annotation_path = annotations_dir / annotation_filename
         annotation_writer.write_annotation(str(annotation_path), adjusted_annotations)
         
@@ -904,7 +904,7 @@ def generate_enhanced_dataset(output_dir: str = 'output', num_images: int = 100,
 if __name__ == '__main__':
     generate_enhanced_dataset(
         output_dir='output',
-        num_images=50,
+        num_images=30,
         symbols_dir='Instruments',
         width=1920,
         height=1080

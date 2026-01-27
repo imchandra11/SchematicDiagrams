@@ -313,10 +313,41 @@ generate_realistic_dataset(
 - Rotation padding uses background color to prevent clipping
 - Symbols maintain aspect ratio during resizing
 
+## DigitizePID Dataset Generator
+
+A separate pipeline generates P&amp;ID-style datasets in DigitizePID format. It uses symbols from `DigitizePID_Dataset/Classes/` (Pumps, Instruments, Motors, Sensors, Valves) and writes:
+
+- **Output/Images/{id}.png** — Rendered P&amp;ID (light grey background, black lines/symbols, notes block, title block)
+- **Output/Annotations/gt_{id}.txt** — ICDAR format: one line per symbol, `x1,y1,x2,y2,x3,y3,x4,y4,SymbolName`
+- **ImagesInfo/{id}/*.npy** — Seven NumPy files: `symbols`, `lines`, `lines2`, `words`, `linker`, `KeyValue`, `Table`
+
+Run:
+
+```bash
+python generate_digitizepid.py
+```
+
+Or from code:
+
+```python
+from pathlib import Path
+from generate_digitizepid import run
+
+run(
+    root=Path("DigitizePID_Dataset"),
+    width=7168,   # full resolution (matches reference samples)
+    height=4561,
+    num_images=10,
+    seed=42,
+)
+```
+
+Use `width=3584, height=2280` for faster runs. Layout, font size, and line width scale with resolution.
+
 ## Requirements
 
 - Python 3.7+
 - opencv-python >= 4.8.0
 - numpy >= 1.24.0
-- albumentations >= 1.3.0
+- albumentations >= 1.3.0 (for `generate_enhanced_dataset.py` only)
 - Pillow >= 10.0.0
