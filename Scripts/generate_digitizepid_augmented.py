@@ -8,11 +8,10 @@ Reuses logic from generate_digitizepid.py and adds:
 - Larger font sizes for notes and title-block text
 
 Output only:
-- DigitizePID_Dataset/Output/Images/0.png, 1.png, ...
-- DigitizePID_Dataset/Output/Annotations/gt_0.txt, gt_1.txt, ...
+- output_dir/Images/0.png, 1.png, ...
+- output_dir/Annotations/gt_0.txt, gt_1.txt, ...
 
 Does NOT save ImagesInfo or any .npy files.
-Uses DigitizePID_Dataset/Classes/ as symbol source.
 """
 
 import cv2
@@ -21,6 +20,38 @@ import random
 import math
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
+
+from constants import (
+    DEFAULT_CANVAS,
+    BG_GREY,
+    LINE_COLOR,
+    TEXT_COLOR,
+    REFERENCE_NOTES_28,
+    REF_WIDTH,
+    REF_WIDTH_FULL,
+    SHEET_MARGIN_BASE,
+    SHEET_MARGIN_SCALE,
+    BLOCKS_BORDER_MARGIN_BASE,
+    BLOCKS_BORDER_MARGIN_SCALE,
+    RIGHT_COL_PAD_BASE,
+    RIGHT_COL_PAD_SCALE,
+    SYMBOL_COUNT_MIN,
+    SYMBOL_COUNT_RANGE,
+    GRID_STEP_BASE,
+    GRID_STEP_SCALE,
+    GRID_STEP_Y_RATIO,
+    CONNECTION_PROB,
+    DISTANCE_THRESHOLD_BASE,
+    DISTANCE_THRESHOLD_SCALE,
+    SYMBOL_SIZE_LARGE_CANVAS_THRESHOLD,
+    SYMBOL_MAX_LARGE,
+    SYMBOL_MAX_SMALL,
+    SYMBOL_MIN_LARGE,
+    SYMBOL_MIN_SMALL,
+    YELLOW_TINT_RGB,
+    YELLOWISH_PAPER_STRENGTH_MIN,
+    YELLOWISH_PAPER_STRENGTH_MAX,
+)
 
 # Reuse core logic from generate_digitizepid
 from generate_digitizepid import (
@@ -35,42 +66,37 @@ from generate_digitizepid import (
     draw_line_segment,
     draw_symbol,
     write_gt_txt,
-    REFERENCE_NOTES_28,
     SymbolLoader,
     _grid_cells,
-    BG_GREY,
-    LINE_COLOR,
-    TEXT_COLOR,
 )
 
 from generate_enhanced_dataset import PixelLevelTransformProcessor
 
-# -----------------------------------------------------------------------------
-# Config (no ImagesInfo)
-# -----------------------------------------------------------------------------
-DEFAULT_ROOT = Path(__file__).resolve().parent / "DigitizePID_Dataset"
-DEFAULT_CANVAS = (7168, 4561)
-
 
 def _config(
-    root: Optional[Path] = None,
+    output_dir: Path,
+    symbols_dir: Path,
+    num_images: int = 10,
     width: Optional[int] = None,
     height: Optional[int] = None,
-    num_images: int = 10,
     seed: Optional[int] = None,
 ) -> Dict[str, Any]:
-    root = Path(root or DEFAULT_ROOT)
+    """Build config from output_dir, symbols_dir, num_images."""
+    output_dir = Path(output_dir)
+    symbols_dir = Path(symbols_dir)
     w = width or DEFAULT_CANVAS[0]
     h = height or DEFAULT_CANVAS[1]
+    # Root for reference content (KeyValue, Table, Notes) - parent of symbols_dir
+    root = symbols_dir.parent
     return {
         "root": root,
         "width": w,
         "height": h,
         "num_images": num_images,
         "seed": seed,
-        "classes_dir": root / "Classes",
-        "output_images_dir": root / "Output" / "Images",
-        "output_annotations_dir": root / "Output" / "Annotations",
+        "classes_dir": symbols_dir,
+        "output_images_dir": output_dir / "Images",
+        "output_annotations_dir": output_dir / "Annotations",
     }
 
 
@@ -79,8 +105,7 @@ def _config(
 # -----------------------------------------------------------------------------
 def apply_yellowish_paper(img: np.ndarray, strength: float = 0.25) -> np.ndarray:
     """Blend image with a light yellow tint to simulate aged/paper look. Expects RGB."""
-    # Light yellowish paper color (RGB)
-    yellow_tint = np.array([245, 235, 200], dtype=np.float32)
+    yellow_tint = np.array(YELLOW_TINT_RGB, dtype=np.float32)
     out = img.astype(np.float32)
     out = (1.0 - strength) * out + strength * yellow_tint
     return np.clip(out, 0, 255).astype(np.uint8)
@@ -105,7 +130,7 @@ def render_canvas_with_headers(
     img = np.zeros((height, width, 3), dtype=np.uint8)
     img[:] = BG_GREY
     font = cv2.FONT_HERSHEY_SIMPLEX
-    scale = width / 3584.0
+    scale = width / REF_WIDTH
     fs = max(0.35, min(0.7, 0.45 * scale))
     th = max(1, int(round(scale)))
     line_w = max(1, min(3, int(round(scale))))
@@ -232,31 +257,31 @@ def generate_one(
     pixel_processor: PixelLevelTransformProcessor,
     apply_yellow: bool = True,
 ) -> None:
-    sheet_margin = max(80, int(90 * width / 3584))
-    blocks_border_margin = max(60, int(70 * width / 3584))
+    sheet_margin = max(SHEET_MARGIN_BASE, int(SHEET_MARGIN_SCALE * width / REF_WIDTH))
+    blocks_border_margin = max(BLOCKS_BORDER_MARGIN_BASE, int(BLOCKS_BORDER_MARGIN_SCALE * width / REF_WIDTH))
     regions = canvas_regions(
         width,
         height,
         outer_margin=sheet_margin,
-        right_col_pad=max(50, int(60 * width / 3584)),
+        right_col_pad=max(RIGHT_COL_PAD_BASE, int(RIGHT_COL_PAD_SCALE * width / REF_WIDTH)),
         blocks_border_margin=blocks_border_margin,
     )
     main_rect = regions["main_diagram"]
 
-    ref_kv, ref_tb, notes_list = load_reference_content(cfg["root"], sample_id, ref_width=width)
+    ref_kv, ref_tb, notes_list = load_reference_content(cfg["root"], sample_id, ref_width=REF_WIDTH_FULL)
     keyvalue = ref_kv if ref_kv is not None else make_keyvalue(sample_id, width, height)
     table = ref_tb if ref_tb is not None else make_table()
 
-    step = max(80, int(100 * width / 3584))
-    cell_count = len(_grid_cells(main_rect, step_x=step, step_y=int(step * 0.9), jitter=0))
-    num_sym = min(cell_count, max(30, random.randint(50, 90)))
+    step = max(GRID_STEP_BASE, int(GRID_STEP_SCALE * width / REF_WIDTH))
+    cell_count = len(_grid_cells(main_rect, step_x=step, step_y=int(step * GRID_STEP_Y_RATIO), jitter=0))
+    num_sym = min(cell_count, max(SYMBOL_COUNT_MIN, random.randint(*SYMBOL_COUNT_RANGE)))
     symbols = loader.get_random_symbols(num_sym)
     placed = place_symbols(
         symbols,
         main_rect,
         use_grid=True,
         grid_step_x=step,
-        grid_step_y=int(step * 0.9),
+        grid_step_y=int(step * GRID_STEP_Y_RATIO),
     )
     if len(placed) == 0:
         print(f"  [sample {sample_id}] no symbols placed, skip")
@@ -265,8 +290,8 @@ def generate_one(
     lines, linker_line = build_connections(
         placed,
         main_rect,
-        connection_prob=0.65,
-        distance_threshold=max(280, int(320 * width / 3584)),
+        connection_prob=CONNECTION_PROB,
+        distance_threshold=max(DISTANCE_THRESHOLD_BASE, int(DISTANCE_THRESHOLD_SCALE * width / REF_WIDTH)),
         max_connections_per_symbol=4,
     )
     words, symbol_refs = build_words_and_linker(placed, lines, linker_line)
@@ -288,7 +313,7 @@ def generate_one(
     img_rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
     img_rgb = pixel_processor.apply_pixel_transforms(img_rgb)
     if apply_yellow:
-        img_rgb = apply_yellowish_paper(img_rgb, strength=random.uniform(0.15, 0.35))
+        img_rgb = apply_yellowish_paper(img_rgb, strength=random.uniform(YELLOWISH_PAPER_STRENGTH_MIN, YELLOWISH_PAPER_STRENGTH_MAX))
     out_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
     out_img_dir = cfg["output_images_dir"]
@@ -301,21 +326,41 @@ def generate_one(
 
 
 def run(
-    root: Optional[Path] = None,
+    output_dir: str,
+    symbols_dir: str,
+    num_images: int = 10,
     width: Optional[int] = None,
     height: Optional[int] = None,
-    num_images: int = 10,
     seed: Optional[int] = None,
     apply_yellowish_paper: bool = True,
 ) -> None:
-    cfg = _config(root=root, width=width, height=height, num_images=num_images, seed=seed)
+    """
+    Generate DigitizePID augmented dataset.
+
+    Args:
+        output_dir: Absolute path to output directory (Images and Annotations subdirs will be created).
+        symbols_dir: Absolute path to symbols/classes directory (e.g., DigitizePID_Dataset/Classes).
+        num_images: Number of images to generate.
+        width: Canvas width (default: 7168).
+        height: Canvas height (default: 4561).
+        seed: Random seed for reproducibility.
+        apply_yellowish_paper: Whether to apply yellowish paper effect.
+    """
+    cfg = _config(
+        output_dir=Path(output_dir),
+        symbols_dir=Path(symbols_dir),
+        num_images=num_images,
+        width=width,
+        height=height,
+        seed=seed,
+    )
     if cfg["seed"] is not None:
         random.seed(cfg["seed"])
         np.random.seed(cfg["seed"])
 
     w = cfg["width"]
-    sym_max = 120 if w >= 5000 else 90
-    sym_min = 50 if w >= 5000 else 36
+    sym_max = SYMBOL_MAX_LARGE if w >= SYMBOL_SIZE_LARGE_CANVAS_THRESHOLD else SYMBOL_MAX_SMALL
+    sym_min = SYMBOL_MIN_LARGE if w >= SYMBOL_SIZE_LARGE_CANVAS_THRESHOLD else SYMBOL_MIN_SMALL
     loader = SymbolLoader(cfg["classes_dir"], max_symbol_size=sym_max, min_symbol_size=sym_min)
     if not loader.symbols:
         raise FileNotFoundError(f"No symbols loaded from {cfg['classes_dir']}")
@@ -331,11 +376,23 @@ def run(
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="DigitizePID augmented dataset generator")
+    parser.add_argument("--output_dir", required=True, help="Absolute path to output directory")
+    parser.add_argument("--symbols_dir", required=True, help="Absolute path to symbols/classes directory")
+    parser.add_argument("--num_images", type=int, default=10, help="Number of images to generate")
+    parser.add_argument("--width", type=int, default=None, help="Canvas width (default: 7168)")
+    parser.add_argument("--height", type=int, default=None, help="Canvas height (default: 4561)")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed")
+    parser.add_argument("--no_yellowish", action="store_true", help="Disable yellowish paper effect")
+    args = parser.parse_args()
+
     run(
-        root=DEFAULT_ROOT,
-        width=DEFAULT_CANVAS[0],
-        height=DEFAULT_CANVAS[1],
-        num_images=5,
-        seed=42,
-        apply_yellowish_paper=True,
+        output_dir=args.output_dir,
+        symbols_dir=args.symbols_dir,
+        num_images=args.num_images,
+        width=args.width,
+        height=args.height,
+        seed=args.seed,
+        apply_yellowish_paper=not args.no_yellowish,
     )

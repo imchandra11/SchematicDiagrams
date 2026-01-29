@@ -17,56 +17,16 @@ import string
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 
-# -----------------------------------------------------------------------------
-# Config
-# -----------------------------------------------------------------------------
-DEFAULT_ROOT = Path(__file__).resolve().parent / "DigitizePID_Dataset"
-DEFAULT_WIDTH = 7168
-DEFAULT_HEIGHT = 4561
-# Match reference samples (7168×4561). Use (3584, 2280) for faster testing.
-DEFAULT_CANVAS = (7168, 4561)
-
-BG_GREY = (204, 204, 204)
-LINE_COLOR = (0, 0, 0)
-TEXT_COLOR = (0, 0, 0)
-KEYVALUE_KEYS = [
-    "PROJECT/LOCATION/ASSIGN", "ORGANIZATION", "CONTRACTOR PROJECT NO.",
-    "CONTRACTOR NO.", "DRAWING NAME", "UNIT", "CONTRACT NAME", "SCALE",
-    "DRAW/SHEET NO.", "REV",
-]
-TABLE_HEADER = ["ISSUE", "DATE", "MADE", "CHECK'D", "APPRV'D", "DESCRIPTION"]
-
-# Reference notes text (28 items) from DigitizePID sample 0 — used when reference dataset is unavailable
-REFERENCE_NOTES_28 = [
-    "1. PLEASE NOTE EVERY DATA PROVIDED HERE (BELOW COLUMN) IS ENTIRELY RANDOM GENERATED, IT HAS NO RELEVANCE/SIMILARITY WITH ANY OTHER DOCUMENTS OF SIMILAR FIELDS WHATSOEVER.",
-    "2. CROSS-CHECKING AT CRITICAL SITES NEAR EFGH VALVES ARE COMPULSORY.",
-    "3. TOP CONNECTION.",
-    "4. DELETED",
-    "5. FOR GENERAL NOTES AND LEGENDS SEE THE DWG-1.23.23.345, DWG-1.23.23.578, DWG-1.23.23.789.",
-    "6. ELEVATION ARE TO CENTER LINES UNLESS OTHERWISE NOTED.",
-    "7. FOLLOWING XYZ SCHEMES ARE REQUIRED. SEE ABC DWG-1.23.45.67.89 FOR DETAILS.",
-    "8. DELETED",
-    "9. TEMPERATURE CONTROL IS SET TO ON/OFF TYPE BY DEFAULT.",
-    "10. COMPONENTS ARE AT NORMAL PRESSURE WITH POWER RATINGS 15.4 KWh",
-    "11. ABC SHUTDOWN IF PQR DETECTS 123 IS NOT WORKING.",
-    "12. CLOSED VESSEL HEATER IS SET TO ON/OFF TYPE AT 30°C AND 50°C.",
-    "13. DELETED",
-    "14. PQR VALVE TO BE INSTALLED AT Q POINT.",
-    "15. DELETED",
-    "16. ORIENTATION OF ABCD VALVES SHALL BE VERIFIED AND CORRECTED AT SITE IN CASE OF MISMATCH.",
-    "17. ALL FIXTURES ARE VALIDATED AND COMPLIANT WITH XYZ.",
-    "18. PRIMARY SUPPORT FOR THE EFGH COMPONENTS IS NOT FOUND AT SITE.",
-    "19. DELETED",
-    "20. DELETED",
-    "21. ABC TRANSMITTOR TO BE USED AS BACKUP FOR KMO TRANSMITTOR.",
-    "22. BUILDING TO BE IN THE SLANTING PLANE THROUGH THE AXIS OF PQRS TYPE VALVES.",
-    "23. DOTTED LINES ARE ALTERNATE.",
-    "24. CONNECTION TO EXHAUST IS PROVIDED.",
-    "25. ALL DIMENSIONS SHALL BE VERIFIED BY XYZ CONTRACTORS BEFORE INSTALLATIONS/OPERATIONS.",
-    "26. DIMENSIONAL TOLERANCE +/- 1MM.",
-    "27. DELETED",
-    "28. DELETED",
-]
+from constants import (
+    DEFAULT_ROOT,
+    DEFAULT_CANVAS,
+    BG_GREY,
+    LINE_COLOR,
+    TEXT_COLOR,
+    KEYVALUE_KEYS,
+    TABLE_HEADER,
+    REFERENCE_NOTES_28,
+)
 
 
 def _config(
@@ -107,23 +67,33 @@ class SymbolLoader:
     def _load_all(self) -> None:
         if not self.classes_dir.is_dir():
             raise FileNotFoundError(f"Classes directory not found: {self.classes_dir}")
-        for cat_dir in sorted(self.classes_dir.iterdir()):
-            if not cat_dir.is_dir():
-                continue
-            for p in sorted(cat_dir.glob("*.png")):
-                img = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
-                if img is None:
-                    continue
-                if img.ndim == 3 and img.shape[2] == 4:
-                    alpha = img[:, :, 3]
-                    img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-                    bg = np.ones((*img.shape[:2], 3), dtype=np.uint8) * 255
-                    alpha_3d = alpha[:, :, np.newaxis] / 255.0
-                    img = (img.astype(np.float64) * alpha_3d + bg.astype(np.float64) * (1 - alpha_3d)).astype(np.uint8)
-                elif img.ndim == 2:
-                    img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-                name = p.stem
-                self.symbols.append((img, name, cat_dir.name))
+        # Support both: (1) subdirs like Classes/Pumps/*.png, (2) flat Classes/*.png
+        subdirs = [d for d in sorted(self.classes_dir.iterdir()) if d.is_dir()]
+        if subdirs:
+            for cat_dir in subdirs:
+                for p in sorted(cat_dir.glob("*.png")):
+                    img, name, cat = self._load_one_symbol(p, cat_dir.name)
+                    if img is not None:
+                        self.symbols.append((img, name, cat))
+        else:
+            for p in sorted(self.classes_dir.glob("*.png")):
+                img, name, cat = self._load_one_symbol(p, self.classes_dir.name)
+                if img is not None:
+                    self.symbols.append((img, name, cat))
+
+    def _load_one_symbol(self, p: Path, category: str) -> Tuple[Optional[np.ndarray], str, str]:
+        img = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
+        if img is None:
+            return None, p.stem, category
+        if img.ndim == 3 and img.shape[2] == 4:
+            alpha = img[:, :, 3]
+            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+            bg = np.ones((*img.shape[:2], 3), dtype=np.uint8) * 255
+            alpha_3d = alpha[:, :, np.newaxis] / 255.0
+            img = (img.astype(np.float64) * alpha_3d + bg.astype(np.float64) * (1 - alpha_3d)).astype(np.uint8)
+        elif img.ndim == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        return img, p.stem, category
 
     def get_random_symbol(self) -> Tuple[np.ndarray, str, str]:
         """Returns (image, symbol_name, category). Image is resized for placement."""
