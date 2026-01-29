@@ -23,10 +23,81 @@ from constants import (
     BG_GREY,
     LINE_COLOR,
     TEXT_COLOR,
-    KEYVALUE_KEYS,
-    TABLE_HEADER,
-    REFERENCE_NOTES_28,
+    LINE_SPEC_MARGIN,
+    LINE_SPEC_MARGIN_MIN,
+    LINE_SPEC_VERTICAL_MARGIN_EXTRA,
 )
+
+
+# -----------------------------------------------------------------------------
+# Random content generators (notes, table header, keyvalue keys)
+# -----------------------------------------------------------------------------
+def _random_word(min_len: int = 3, max_len: int = 10, uppercase: bool = False) -> str:
+    """Generate a random word (letters only)."""
+    n = random.randint(min_len, max_len)
+    s = "".join(random.choices(string.ascii_letters, k=n))
+    return s.upper() if uppercase else s
+
+
+def _random_sentence(min_words: int = 4, max_words: int = 18) -> str:
+    """Generate a random sentence (schematic-style note) using templates and placeholders."""
+    templates = [
+        "{} SHALL BE VERIFIED AT SITE BEFORE {}.",
+        "{} TO BE INSTALLED AT {} POINT.",
+        "FOR {} SEE THE {} FOR DETAILS.",
+        "{} ARE TO CENTER LINES UNLESS OTHERWISE NOTED.",
+        "{} CONTROL IS SET TO {} TYPE BY DEFAULT.",
+        "{} AT NORMAL PRESSURE WITH {} RATINGS.",
+        "{} SHUTDOWN IF {} DETECTS {} IS NOT WORKING.",
+        "{} SHALL BE VERIFIED BY {} CONTRACTORS BEFORE INSTALLATIONS.",
+        "{} VALVE TO BE INSTALLED AT {}.",
+        "{} LINES ARE ALTERNATE.",
+        "CONNECTION TO {} IS PROVIDED.",
+        "{} TOLERANCE +/- {}.",
+        "{} TO BE USED AS BACKUP FOR {}.",
+        "{} SHALL BE VERIFIED AND CORRECTED AT SITE.",
+        "PLEASE NOTE {} PROVIDED HERE IS RANDOM GENERATED.",
+        "CROSS-CHECKING AT CRITICAL SITES NEAR {} ARE COMPULSORY.",
+        "{} COMPONENTS ARE NOT FOUND AT SITE.",
+        "{} VALIDATED AND COMPLIANT WITH {}.",
+    ]
+    placeholders = [
+        "ORIENTATION", "VALVES", "DIMENSIONS", "ELEVATION", "TEMPERATURE",
+        "COMPONENTS", "PQR", "ABC", "XYZ", "DOTTED", "EXHAUST", "DIMENSIONAL", "1MM",
+        "TRANSMITTOR", "KMO", "ABCD", "EFGH", "FIXTURES", "DATA", "EFGH VALVES",
+        "PRIMARY SUPPORT", "ALL FIXTURES", "PROJ", "DWG-1.23.23.345",
+    ]
+    t = random.choice(templates)
+    n_placeholders = t.count("{}")
+    fills = [random.choice(placeholders) if placeholders else _random_word(2, 6, uppercase=True) for _ in range(n_placeholders)]
+    try:
+        return t.format(*fills)
+    except (IndexError, TypeError):
+        return " ".join(random.choices(placeholders or ["NOTE"], k=min(5, n_placeholders or 5))) + "."
+
+
+def generate_random_notes(count: Optional[int] = None) -> List[str]:
+    """Generate a list of random note sentences. Count between 15 and 28 if not given."""
+    n = count if count is not None else random.randint(15, 28)
+    return [_random_sentence() for _ in range(n)]
+
+
+def generate_random_table_header(num_cols: Optional[int] = None) -> List[str]:
+    """Generate random column names for table header (4-7 words)."""
+    n = num_cols if num_cols is not None else random.randint(4, 7)
+    return [_random_word(3, 10, uppercase=True).replace(" ", "_") for _ in range(n)]
+
+
+def generate_random_keyvalue_keys(num_keys: Optional[int] = None) -> List[str]:
+    """Generate random key names for keyvalue block (6-12 keys)."""
+    n = num_keys if num_keys is not None else random.randint(6, 12)
+    keys = []
+    for _ in range(n):
+        k = _random_word(2, 8, uppercase=True)
+        if random.random() < 0.4:
+            k = k + "/" + _random_word(2, 6, uppercase=True)
+        keys.append(k.replace(" ", "_"))
+    return keys
 
 
 def _config(
@@ -123,11 +194,11 @@ def canvas_regions(
     title_height: Optional[int] = None,
     right_col_pad: Optional[int] = None,
     blocks_border_margin: Optional[int] = None,
-) -> Dict[str, Tuple[int, int, int, int]]:
+    has_description_block: bool = False,
+) -> Dict[str, Optional[Tuple[int, int, int, int]]]:
     """
-    Returns (x1,y1,x2,y2) for main_diagram, notes, title_block.
-    Main stays inside image; notes top-right, title bottom-right.
-    blocks_border_margin = extra margin between outer border and notes/title blocks (right, top, bottom).
+    Returns (x1,y1,x2,y2) for main_diagram, notes, title_block, and optionally description.
+    Main stays inside image; notes top-right, description middle-right (if has_description_block), title bottom-right.
     """
     ref_h = 4561
     ref_w = 7168
@@ -135,43 +206,44 @@ def canvas_regions(
     scale_w = width / ref_w
     scale = max(scale_w, scale_h)
 
-    # Outer margin so main block never touches/crosses image border
     M = outer_margin if outer_margin is not None else max(80, int(90 * scale))
-    # Extra margin for notes/title blocks from border (right edge, top of notes, bottom of title)
     B = blocks_border_margin if blocks_border_margin is not None else max(60, int(70 * scale))
-    # Padding between main diagram and right column (notes/title)
     col_pad = right_col_pad if right_col_pad is not None else max(50, int(60 * scale))
-    # Right column: main ends, then gap, then notes/title (inset by B from right border)
     main_right = int(0.68 * width) - col_pad
     right_x1 = main_right + col_pad
-    right_x2 = width - M - B  # more margin from right border
+    right_x2 = width - M - B
 
-    # Notes block: top-right, with extra top margin B from border
     notes_h = notes_height if notes_height is not None else max(680, int(750 * scale_h))
     notes = (right_x1, M + B, right_x2, M + B + notes_h)
 
-    # Title block: bottom-right, with extra bottom margin B from border (height increased to avoid overflow)
     title_h = title_height if title_height is not None else max(680, int(760 * scale_h))
     title_block = (right_x1, height - M - B - title_h, right_x2, height - M - B)
 
-    # Main diagram: left of right column, fully inside outer margin (never crosses border)
+    # Description block: between notes and title block (middle of right column)
+    description = None
+    if has_description_block:
+        desc_y1 = M + B + notes_h
+        desc_y2 = height - M - B - title_h
+        if desc_y2 > desc_y1 + 80:  # only if there is space
+            description = (right_x1, desc_y1, right_x2, desc_y2)
+
     main_diagram = (M, M, main_right, height - M)
 
-    return {"main_diagram": main_diagram, "notes": notes, "title_block": title_block}
+    return {"main_diagram": main_diagram, "notes": notes, "title_block": title_block, "description": description}
 
 
 # -----------------------------------------------------------------------------
 # Load reference KeyValue, Table, Notes from DigitizePID_Dataset/{0..14}/
 # -----------------------------------------------------------------------------
 def load_reference_content(root: Path, ref_sample_id: int, ref_width: int = 7168) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[str]]:
-    """Load KeyValue, Table, and notes list from reference sample. Returns (keyvalue, table, notes_list)."""
+    """Load KeyValue, Table, and notes list from reference sample. Returns (keyvalue, table, notes_list). If no ref files, returns (None, None, random notes)."""
     root = Path(root)
     sid = ref_sample_id % 15
     kv_path = root / str(sid) / f"{sid}_KeyValue.npy"
     tb_path = root / str(sid) / f"{sid}_Table.npy"
     wd_path = root / str(sid) / f"{sid}_words.npy"
     keyvalue, table = None, None
-    notes_list = list(REFERENCE_NOTES_28)
+    notes_list = generate_random_notes()
 
     if kv_path.exists():
         try:
@@ -228,6 +300,36 @@ def _rects_overlap(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int], p
     ax1, ay1, ax2, ay2 = a[0] - pad, a[1] - pad, a[2] + pad, a[3] + pad
     bx1, by1, bx2, by2 = b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad
     return not (ax2 < bx1 or bx2 < ax1 or ay2 < by1 or by2 < ay1)
+
+
+def _point_to_segment_dist(
+    px: float, py: float, x1: float, y1: float, x2: float, y2: float
+) -> Tuple[float, float, float]:
+    """Minimum distance from point (px,py) to segment (x1,y1)-(x2,y2). Returns (dist, closest_x, closest_y)."""
+    dx = x2 - x1
+    dy = y2 - y1
+    seg_len_sq = dx * dx + dy * dy
+    if seg_len_sq < 1e-10:
+        cx, cy = x1, y1
+        return math.hypot(px - cx, py - cy), cx, cy
+    t = ((px - x1) * dx + (py - y1) * dy) / seg_len_sq
+    t = max(0.0, min(1.0, t))
+    cx = x1 + t * dx
+    cy = y1 + t * dy
+    return math.hypot(px - cx, py - cy), cx, cy
+
+
+def _point_to_polyline_dist(
+    px: float, py: float, segments: List[Tuple[int, int, int, int]]
+) -> Tuple[float, float, float]:
+    """Minimum distance from (px,py) to any segment of the polyline. Returns (min_dist, closest_x, closest_y)."""
+    min_d = float("inf")
+    best_cx, best_cy = px, py
+    for s in segments:
+        d, cx, cy = _point_to_segment_dist(px, py, float(s[0]), float(s[1]), float(s[2]), float(s[3]))
+        if d < min_d:
+            min_d, best_cx, best_cy = d, cx, cy
+    return min_d, best_cx, best_cy
 
 
 def _get_polygon_tl_tr_br_bl(x: int, y: int, w: int, h: int, angle_deg: float = 0) -> List[Tuple[int, int]]:
@@ -500,7 +602,7 @@ def build_connections(
 
 
 # -----------------------------------------------------------------------------
-# Text: tags per symbol, line specs
+# Text: tags per symbol, line specs (horizontal/vertical by segment direction)
 # -----------------------------------------------------------------------------
 def _gen_tag() -> str:
     pref = "".join(random.choices(string.ascii_uppercase, k=2))
@@ -517,11 +619,11 @@ def build_words_and_linker(
 ) -> Tuple[List[Dict], Dict[int, List[str]]]:
     """
     For each symbol, assign a tag and bbox (approx). For each line, place spec text and bbox.
+    Line spec text: horizontal if segment is more horizontal, vertical if segment is more vertical.
     Returns (words_list, symbol_idx -> [word_id, line_id, ...] for linker).
     """
     words: List[Dict] = []
     symbol_refs: Dict[int, List[str]] = {i: [] for i in range(len(placed))}
-    # Font for bbox estimation
     font = cv2.FONT_HERSHEY_SIMPLEX
     base_h = 20
     for i, p in enumerate(placed):
@@ -535,50 +637,241 @@ def build_words_and_linker(
         words.append({"word_id": wid, "bbox": [bx1, by1, bx2, by2], "text": tag, "flags": 0})
         symbol_refs[i].append(wid)
     for (line_idx_ish, line_id) in linker_line:
-        # line_idx_ish is symbol index; we attach line_id to that symbol
         symbol_refs[line_idx_ish].append(line_id)
-    # Line spec words: one per line, placed at first segment mid
+    # Line spec words: middle of path, offset by margin; never overlap symbols (try both sides / along line)
+    spec_pad = 18  # extra clearance from symbols for spec bbox check
     for line in lines:
-        seg = line["segments"][0]
-        mx = (seg[0] + seg[2]) // 2
-        my = (seg[1] + seg[3]) // 2
-        bx1, by1 = mx - 50, my - 12
-        bx2, by2 = mx + 50, my + 12
+        segments = line["segments"]
+        if not segments:
+            continue
+        total_len = 0.0
+        seg_lengths = []
+        for s in segments:
+            x1, y1, x2, y2 = s[0], s[1], s[2], s[3]
+            L = math.hypot(x2 - x1, y2 - y1)
+            seg_lengths.append((x1, y1, x2, y2, L))
+            total_len += L
+        if total_len < 1:
+            seg = segments[0]
+            mx = (seg[0] + seg[2]) // 2
+            my = (seg[1] + seg[3]) // 2
+            seg_dx = seg[2] - seg[0]
+            seg_dy = seg[3] - seg[1]
+        else:
+            half = total_len / 2
+            acc = 0.0
+            mx, my = 0, 0
+            seg_dx, seg_dy = 0, 0
+            for (x1, y1, x2, y2, L) in seg_lengths:
+                if acc + L >= half:
+                    t = (half - acc) / L if L > 0 else 0
+                    mx = int(x1 + t * (x2 - x1))
+                    my = int(y1 + t * (y2 - y1))
+                    seg_dx = x2 - x1
+                    seg_dy = y2 - y1
+                    break
+                acc += L
+            else:
+                x1, y1, x2, y2, L = seg_lengths[-1]
+                mx = (x1 + x2) // 2
+                my = (y1 + y2) // 2
+                seg_dx = x2 - x1
+                seg_dy = y2 - y1
+        seg_len = math.hypot(seg_dx, seg_dy) or 1.0
+        perp_x = -seg_dy / seg_len
+        perp_y = seg_dx / seg_len
+        line_spec_vertical = abs(seg_dy) > abs(seg_dx)
+        # Spec bbox size (approximate text footprint: half-width, half-height from center)
+        spec_hw = (12, 50) if line_spec_vertical else (50, 12)
+        # Half-extent of text in the perpendicular direction (so we offset center by gap + this)
+        half_extent_perp = spec_hw[1] if line_spec_vertical else spec_hw[0]
+        # Clear gap; for vertical specs use extra margin so they stay clearly off the vertical line
+        max_coord = max(max(s[0], s[1], s[2], s[3]) for s in segments) if segments else 3584
+        scale = max(1.2, max_coord / 2500.0)
+        gap = max(LINE_SPEC_MARGIN_MIN, int(LINE_SPEC_MARGIN * scale))
+        if line_spec_vertical:
+            gap = gap + LINE_SPEC_VERTICAL_MARGIN_EXTRA  # vertical rotated specs: keep well away from line
+        margin = gap + half_extent_perp
+
+        def _spec_overlaps_symbol(px: int, py: int) -> bool:
+            s1 = px - spec_hw[0] - spec_pad
+            s2 = py - spec_hw[1] - spec_pad
+            s3 = px + spec_hw[0] + spec_pad
+            s4 = py + spec_hw[1] + spec_pad
+            spec_rect = (s1, s2, s3, s4)
+            for p in placed:
+                sym_rect = _get_bbox_rect(p["x"], p["y"], p["rotated_w"], p["rotated_h"])
+                if _rects_overlap(spec_rect, sym_rect, pad=0):
+                    return True
+            return False
+
+        # Horizontal specs: simple placement only (skip push-away)
+        # Vertical specs: enforce clearance from entire line (push away + final guarantee)
+        required_clearance = gap + half_extent_perp
+        px_f = mx + perp_x * margin
+        py_f = my + perp_y * margin
+        if line_spec_vertical:
+            min_d, cx, cy = _point_to_polyline_dist(px_f, py_f, segments)
+            if min_d < required_clearance and min_d > 1e-6:
+                shift = required_clearance - min_d
+                dir_x = (px_f - cx) / min_d
+                dir_y = (py_f - cy) / min_d
+                px_f = px_f + dir_x * shift
+                py_f = py_f + dir_y * shift
+            elif min_d <= 1e-6:
+                px_f = mx + perp_x * required_clearance
+                py_f = my + perp_y * required_clearance
+        px, py = int(round(px_f)), int(round(py_f))
+        if _spec_overlaps_symbol(px, py):
+            px_f = mx - perp_x * margin
+            py_f = my - perp_y * margin
+            if line_spec_vertical:
+                min_d, cx, cy = _point_to_polyline_dist(px_f, py_f, segments)
+                if min_d < required_clearance and min_d > 1e-6:
+                    shift = required_clearance - min_d
+                    dir_x = (px_f - cx) / min_d
+                    dir_y = (py_f - cy) / min_d
+                    px_f = px_f + dir_x * shift
+                    py_f = py_f + dir_y * shift
+                elif min_d <= 1e-6:
+                    px_f = mx - perp_x * required_clearance
+                    py_f = my - perp_y * required_clearance
+            px, py = int(round(px_f)), int(round(py_f))
+        if _spec_overlaps_symbol(px, py):
+            for frac in (0.35, -0.35, 0.5, -0.5):
+                if total_len < 1:
+                    break
+                acc = 0.0
+                target = half + frac * total_len * 0.3
+                target = max(0, min(total_len, target))
+                for (x1, y1, x2, y2, L) in seg_lengths:
+                    if acc + L >= target:
+                        t = (target - acc) / L if L > 0 else 0
+                        t = max(0, min(1, t))
+                        mx2 = x1 + t * (x2 - x1)
+                        my2 = y1 + t * (y2 - y1)
+                        px_f = mx2 + perp_x * margin
+                        py_f = my2 + perp_y * margin
+                        if line_spec_vertical:
+                            min_d, cx, cy = _point_to_polyline_dist(px_f, py_f, segments)
+                            if min_d < required_clearance and min_d > 1e-6:
+                                shift = required_clearance - min_d
+                                dir_x = (px_f - cx) / min_d
+                                dir_y = (py_f - cy) / min_d
+                                px_f += dir_x * shift
+                                py_f += dir_y * shift
+                            elif min_d <= 1e-6:
+                                px_f = mx2 + perp_x * required_clearance
+                                py_f = my2 + perp_y * required_clearance
+                        px, py = int(round(px_f)), int(round(py_f))
+                        if not _spec_overlaps_symbol(px, py):
+                            break
+                        px_f = mx2 - perp_x * margin
+                        py_f = my2 - perp_y * margin
+                        if line_spec_vertical:
+                            min_d, cx, cy = _point_to_polyline_dist(px_f, py_f, segments)
+                            if min_d < required_clearance and min_d > 1e-6:
+                                shift = required_clearance - min_d
+                                dir_x = (px_f - cx) / min_d
+                                dir_y = (py_f - cy) / min_d
+                                px_f += dir_x * shift
+                                py_f += dir_y * shift
+                            elif min_d <= 1e-6:
+                                px_f = mx2 - perp_x * required_clearance
+                                py_f = my2 - perp_y * required_clearance
+                        px, py = int(round(px_f)), int(round(py_f))
+                        if not _spec_overlaps_symbol(px, py):
+                            break
+                        break
+                    acc += L
+                else:
+                    continue
+                if not _spec_overlaps_symbol(px, py):
+                    break
+        # Vertical specs only: final guarantee that center is required_clearance from the line
+        if line_spec_vertical:
+            px_f, py_f = float(px), float(py)
+            min_d, cx, cy = _point_to_polyline_dist(px_f, py_f, segments)
+            if min_d < required_clearance and min_d > 1e-6:
+                shift = required_clearance - min_d
+                dir_x = (px_f - cx) / min_d
+                dir_y = (py_f - cy) / min_d
+                px_f += dir_x * shift
+                py_f += dir_y * shift
+                px, py = int(round(px_f)), int(round(py_f))
+            elif min_d <= 1e-6:
+                side = (px_f - mx) * perp_x + (py_f - my) * perp_y
+                if side >= 0:
+                    px_f = mx + perp_x * required_clearance
+                    py_f = my + perp_y * required_clearance
+                else:
+                    px_f = mx - perp_x * required_clearance
+                    py_f = my - perp_y * required_clearance
+                px, py = int(round(px_f)), int(round(py_f))
+        hw_w, hw_h = spec_hw[0], spec_hw[1]
+        bx1, by1 = px - hw_w, py - hw_h
+        bx2, by2 = px + hw_w, py + hw_h
         wid = f"word_{len(words) + 1}"
-        words.append({"word_id": wid, "bbox": [bx1, by1, bx2, by2], "text": line["spec"], "flags": 0})
+        words.append({
+            "word_id": wid, "bbox": [bx1, by1, bx2, by2], "text": line["spec"], "flags": 0,
+            "line_spec_vertical": line_spec_vertical,
+            "line_spec_anchor": (px, py),
+        })
     return words, symbol_refs
 
 
 # -----------------------------------------------------------------------------
-# KeyValue and Table templates
+# KeyValue and Table (random keys/header and values)
 # -----------------------------------------------------------------------------
-def make_keyvalue(sample_id: int, width: int, height: int) -> np.ndarray:
-    arr = np.array([
-        [KEYVALUE_KEYS[0], f"{''.join(random.choices(string.ascii_uppercase, k=2))}-{random.randint(10,99)}-{random.randint(10,99)}"],
-        [KEYVALUE_KEYS[1], f"P-{random.randint(0,9)}"],
-        [KEYVALUE_KEYS[2], f"{''.join(random.choices(string.ascii_uppercase, k=2))}-{random.randint(1000,9999)}"],
-        [KEYVALUE_KEYS[3], str(random.randint(100, 999))],
-        [KEYVALUE_KEYS[4], f"SAMPLE_{random.randint(1000,9999)}.PNG"],
-        [KEYVALUE_KEYS[5], f"{random.randint(100,999)}-{random.randint(1000,9999)}"],
-        [KEYVALUE_KEYS[6], "PROJ. XYZ P&ID"],
-        [KEYVALUE_KEYS[7], random.choice(["None", "Std.", "NTS"])],
-        [KEYVALUE_KEYS[8], str(random.randint(80000000, 99999999))],
-        [KEYVALUE_KEYS[9], str(random.randint(1, 5))],
-    ], dtype=object)
+def _gen_keyvalue_value(key_index: int) -> str:
+    """Generate a plausible random value for a keyvalue row."""
+    choices = [
+        f"{''.join(random.choices(string.ascii_uppercase, k=2))}-{random.randint(10,99)}-{random.randint(10,99)}",
+        f"P-{random.randint(0,9)}",
+        f"{''.join(random.choices(string.ascii_uppercase, k=2))}-{random.randint(1000,9999)}",
+        str(random.randint(100, 999)),
+        f"SAMPLE_{random.randint(1000,9999)}.PNG",
+        f"{random.randint(100,999)}-{random.randint(1000,9999)}",
+        "PROJ. XYZ P&ID",
+        random.choice(["None", "Std.", "NTS"]),
+        str(random.randint(80000000, 99999999)),
+        str(random.randint(1, 5)),
+        "".join(random.choices(string.ascii_uppercase, k=random.randint(2, 6))),
+        f"{random.randint(1,28):02d}/{random.randint(1,12):02d}/{random.randint(2020,2025)}",
+    ]
+    return random.choice(choices)
+
+
+def make_keyvalue(sample_id: int, width: int, height: int, keys: Optional[List[str]] = None) -> np.ndarray:
+    """Build keyvalue array. If keys is None, generate random keys (6-12)."""
+    if keys is None:
+        keys = generate_random_keyvalue_keys()
+    # Ensure unique keys for display
+    seen = set()
+    unique_keys = []
+    for k in keys:
+        if k not in seen:
+            seen.add(k)
+            unique_keys.append(k)
+    arr = np.array([[k, _gen_keyvalue_value(i)] for i, k in enumerate(unique_keys)], dtype=object)
     return arr
 
 
-def make_table() -> np.ndarray:
-    rows = [TABLE_HEADER]
+def make_table(header: Optional[List[str]] = None) -> np.ndarray:
+    """Build table array. If header is None, generate random column names (4-7)."""
+    if header is None:
+        header = generate_random_table_header()
+    rows = [list(header)]
+    ncols = len(header)
     for i, letter in enumerate(["A", "B", "C", "D"]):
-        rows.append([
-            letter,
-            f"{random.randint(1,28):02d}/{random.randint(1,12):02d}/{random.randint(0,9)}2" if random.random() > 0.5 else f"{random.randint(1,28)}{random.choice('JanFebMarAprMayJunJulAugSepOctNovDec')}{random.randint(0,9)}",
-            "".join(random.choices(string.ascii_uppercase, k=random.randint(2,4))),
-            "".join(random.choices(string.ascii_uppercase, k=random.randint(2,3))),
-            "".join(random.choices(string.ascii_uppercase, k=random.randint(2,4))),
-            f"ISSUE CONSTR. REV.{i+1}",
-        ])
+        row = [letter]
+        for _ in range(ncols - 1):
+            row.append(
+                f"{random.randint(1,28):02d}/{random.randint(1,12):02d}/{random.randint(0,9)}2"
+                if random.random() > 0.5
+                else "".join(random.choices(string.ascii_uppercase, k=random.randint(2, 4)))
+            )
+        rows.append(row)
     return np.array(rows, dtype=object)
 
 
@@ -716,7 +1009,7 @@ def render_canvas(
     note_fs = max(0.28, 0.32 * scale)
     note_dy = int(26 * scale)
     cv2.putText(img, "NOTES", (nx1 + note_pad, ny1 + note_dy), font, max(0.4, 0.5 * scale), TEXT_COLOR, th, cv2.LINE_AA)
-    nlist = notes_list or REFERENCE_NOTES_28
+    nlist = notes_list if notes_list else generate_random_notes()
     line_h = int(20 * scale)
     for i, text in enumerate(nlist[:28]):
         y_pos = ny1 + note_dy + (i + 1) * line_h

@@ -313,36 +313,103 @@ generate_realistic_dataset(
 - Rotation padding uses background color to prevent clipping
 - Symbols maintain aspect ratio during resizing
 
-## DigitizePID Dataset Generator
+## DigitizePID Dataset Generator (Augmented)
 
-A separate pipeline generates P&amp;ID-style datasets in DigitizePID format. It uses symbols from `DigitizePID_Dataset/Classes/` (Pumps, Instruments, Motors, Sensors, Valves) and writes:
+The main P&amp;ID dataset pipeline lives under **`Scripts/`** and is run via **`DataGenerator.ipynb`** or the command line. It generates P&amp;ID-style images with variable layout, dynamic text, and CRAFT ICDAR annotations.
 
-- **Output/Images/{id}.png** — Rendered P&amp;ID (light grey background, black lines/symbols, notes block, title block)
-- **Output/Annotations/gt_{id}.txt** — ICDAR format: one line per symbol, `x1,y1,x2,y2,x3,y3,x4,y4,SymbolName`
-- **ImagesInfo/{id}/*.npy** — Seven NumPy files: `symbols`, `lines`, `lines2`, `words`, `linker`, `KeyValue`, `Table`
+### Input structure
 
-Run:
+Symbols are read from a **Classes** directory with category subfolders:
 
-```bash
-python generate_digitizepid.py
+```
+Classes/
+├── Pumps/
+├── Instruments/
+├── Motors/
+├── Valves/
+└── ...
 ```
 
-Or from code:
+Each subfolder contains `.png` symbol images. A flat directory (e.g. `Instruments/` with PNGs only) is also supported.
+
+### Output structure
+
+```
+Output/
+├── Images/
+│   ├── 0.png, 1.png, 2.png, ...
+└── Annotations/
+    ├── gt_0.txt, gt_1.txt, gt_2.txt, ...
+```
+
+- **Images**: Rendered P&amp;ID (grey background, black lines/symbols, optional notes/title block/description).
+- **Annotations**: CRAFT ICDAR format — one line per symbol: `x1,y1,x2,y2,x3,y3,x4,y4,SymbolName`.
+
+### Features
+
+- **Line specs orientation**: Line-spec text is drawn **horizontally** when the pipe segment is more horizontal, and **vertically** (top-to-bottom) when the segment is more vertical.
+- **Symbol size**: Symbols are drawn slightly larger (tunable via `Scripts/constants.py`: `SYMBOL_MAX_LARGE`, `SYMBOL_MAX_SMALL`, etc.).
+- **Dynamic content** (no fixed text constants):
+  - **Notes**: Random schematic-style sentences (templates + placeholders).
+  - **Table header**: Random column names (4–7 words).
+  - **KeyValue keys**: Random key names (6–12 keys); values are random codes/numbers.
+- **Variable layout** (per image):
+  - Some images have **only notes**, some **only title block**, some **both**.
+  - Title block may **include or omit** the table (key–value rows always when title block is present).
+  - Optional **DESCRIPTION** block between notes and title block (random sentences); present only on a subset of images.
+
+### How to run
+
+**From the notebook (recommended)**
+
+1. Open `DataGenerator.ipynb`.
+2. Set paths and number of images in the first code cell:
 
 ```python
+output_dir = r"C:\Users\...\DigitizePID_Dataset\Output"
+symbols_dir = r"C:\Users\...\DigitizePID_Dataset\Classes"
+num_images = 20
+```
+
+3. Run the second cell to execute the script with those variables:
+
+```python
+%run Scripts/generate_digitizepid_augmented.py --output_dir $output_dir --symbols_dir $symbols_dir --num_images $num_images
+```
+
+**From the command line**
+
+From the project root (where `Scripts/` lives):
+
+```bash
+python Scripts/generate_digitizepid_augmented.py --output_dir "C:\path\to\Output" --symbols_dir "C:\path\to\Classes" --num_images 20
+```
+
+Optional: `--width`, `--height`, `--seed`, `--no_yellowish` (disable yellowish paper effect).
+
+**From Python**
+
+```python
+import sys
 from pathlib import Path
-from generate_digitizepid import run
+sys.path.insert(0, str(Path(".").resolve() / "Scripts"))
+from generate_digitizepid_augmented import run
 
 run(
-    root=Path("DigitizePID_Dataset"),
-    width=7168,   # full resolution (matches reference samples)
+    output_dir=r"C:\path\to\Output",
+    symbols_dir=r"C:\path\to\Classes",
+    num_images=20,
+    width=7168,   # default; use smaller for faster runs
     height=4561,
-    num_images=10,
     seed=42,
 )
 ```
 
-Use `width=3584, height=2280` for faster runs. Layout, font size, and line width scale with resolution.
+Use smaller `width`/`height` (e.g. 3584×2280) for quicker runs. Layout, font size, and line width scale with resolution.
+
+### Constants and layout
+
+Shared constants (margins, symbol counts, connection probability, symbol sizes, etc.) are in **`Scripts/constants.py`**. Notes, table headers, and keyvalue keys are **not** in constants; they are generated at runtime in `Scripts/generate_digitizepid.py`.
 
 ## Requirements
 
